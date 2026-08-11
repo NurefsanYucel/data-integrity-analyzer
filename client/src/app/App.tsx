@@ -1,19 +1,107 @@
-export default function App() {
-  return (
-    <main className="min-h-screen bg-slate-100 flex items-center justify-center">
-      <div className="bg-white rounded-xl shadow-lg p-10 w-[700px]">
-        <h1 className="text-4xl font-bold text-slate-900">
-          📊 Data Integrity Analyzer
-        </h1>
+import { useMemo, useRef, useState } from "react";
+import type { ChangeEvent, DragEvent } from "react";
+import { AlertTriangle, ArrowDownToLine, Check, CheckCircle2, ChevronRight, Database, FileSpreadsheet, FileUp, History, Search, Settings2, ShieldAlert, ShieldCheck, Sparkles, Upload, WandSparkles, X } from "lucide-react";
 
-        <p className="mt-4 text-slate-600">
-          Welcome to your portfolio project.
-        </p>
+type Row = Record<string, string>;
+type IssueType = "Duplicate ID" | "Duplicate email" | "Invalid email" | "Missing value" | "Invalid type" | "Sensitive data";
+type Issue = { row: number; field: string; value: string; type: IssueType; message: string; severity: "high" | "medium" | "low" };
+type Rules = { required: boolean; uniqueId: boolean; email: boolean; numeric: boolean; pii: boolean };
+type Run = { id: string; fileName: string; date: string; rows: number; score: number; issues: number };
 
-        <button className="mt-8 rounded-lg bg-blue-600 px-6 py-3 text-white hover:bg-blue-700">
-          Upload CSV
-        </button>
-      </div>
-    </main>
-  );
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phonePattern = /(?:\+?\d[\d\s().-]{7,}\d)/;
+const sample = `customer_id,full_name,email,age,department\n1001,Ada Lovelace,ada@analytical.org,36,Engineering\n1002,Grace Hopper,grace.hopper@navy.mil,85,Engineering\n1003,Alan Turing,alan.turing.example,41,Research\n1001,Katherine Johnson,katherine@nasa.gov,101,Research\n1005,,marie@curie.org,66,Science\n1006,Linus Torvalds,grace.hopper@navy.mil,55,Engineering`;
+
+function parseCsv(text: string): Row[] {
+  // Supports quoted values, escaped quotes, and either Unix or Windows line endings
+  // without adding a CSV parsing dependency to this browser-only application.
+  const cells: string[][] = []; let row: string[] = []; let cell = ""; let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') { if (quoted && text[index + 1] === '"') { cell += char; index += 1; } else quoted = !quoted; }
+    else if (char === "," && !quoted) { row.push(cell.trim()); cell = ""; }
+    else if ((char === "\n" || char === "\r") && !quoted) { if (char === "\r" && text[index + 1] === "\n") index += 1; row.push(cell.trim()); if (row.some(Boolean)) cells.push(row); row = []; cell = ""; }
+    else cell += char;
+  }
+  row.push(cell.trim()); if (row.some(Boolean)) cells.push(row);
+  const [headers, ...records] = cells; if (!headers?.length) return [];
+  return records.map((record) => Object.fromEntries(headers.map((header, index) => [header || `Column ${index + 1}`, record[index] ?? ""])));
 }
+
+function inferType(values: string[]) {
+  const clean = values.filter(Boolean); if (!clean.length) return "Empty";
+  if (clean.every((value) => !Number.isNaN(Number(value)))) return "Number";
+  if (clean.every((value) => !Number.isNaN(Date.parse(value)))) return "Date";
+  if (clean.every((value) => emailPattern.test(value))) return "Email";
+  return "Text";
+}
+
+function escapeCsv(value: string | number) { return `"${String(value).replaceAll('"', '""')}"`; }
+
+function readHistory(): Run[] {
+  try { return JSON.parse(localStorage.getItem("dia-runs") || "[]"); }
+  catch { return []; }
+}
+
+export default function App() {
+  const input = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState(""); const [rows, setRows] = useState<Row[]>([]);
+  const [idField, setIdField] = useState(""); const [emailField, setEmailField] = useState("");
+  const [rules, setRules] = useState<Rules>({ required: true, uniqueId: true, email: true, numeric: false, pii: true });
+  const [filter, setFilter] = useState<IssueType | "All">("All"); const [query, setQuery] = useState("");
+  // Validation history is deliberately local: uploaded data never leaves the browser.
+  const [history, setHistory] = useState<Run[]>(readHistory); const [activeTab, setActiveTab] = useState<"issues" | "profile" | "history">("issues");
+  const headers = useMemo(() => rows[0] ? Object.keys(rows[0]) : [], [rows]);
+
+  const issues = useMemo<Issue[]>(() => {
+    const results: Issue[] = [];
+    const add = (row: number, field: string, value: string, type: IssueType, message: string, severity: Issue["severity"] = "medium") => results.push({ row, field, value, type, message, severity });
+    const duplicates = (field: string, type: IssueType) => {
+      if (!field) return; const locations = new Map<string, number[]>();
+      rows.forEach((record, index) => { const value = record[field].trim().toLowerCase(); if (value) locations.set(value, [...(locations.get(value) || []), index]); });
+      locations.forEach((indexes) => indexes.length > 1 && indexes.forEach((index) => add(index + 2, field, rows[index][field], type, `Appears in ${indexes.length} records`, "high")));
+    };
+    if (rules.uniqueId) duplicates(idField, "Duplicate ID"); if (rules.email) duplicates(emailField, "Duplicate email");
+    rows.forEach((record, index) => headers.forEach((field) => {
+      const value = record[field].trim();
+      if (rules.required && !value) add(index + 2, field, "—", "Missing value", "Required cell is empty", "high");
+      if (rules.email && field === emailField && value && !emailPattern.test(value)) add(index + 2, field, value, "Invalid email", "Email format is not valid", "medium");
+      if (rules.numeric && /age|amount|count|number|price|quantity/i.test(field) && value && Number.isNaN(Number(value))) add(index + 2, field, value, "Invalid type", "Expected a numeric value", "medium");
+      // Heuristic PII flagging is intentionally conservative; it is a review signal,
+      // not a substitute for a dedicated compliance or data-classification service.
+      if (rules.pii && field !== emailField && value && (phonePattern.test(value) || /\b\d{3}-?\d{2}-?\d{4}\b/.test(value))) add(index + 2, field, value, "Sensitive data", "Possible phone number or national identifier", "low");
+    }));
+    return results.sort((a, b) => a.row - b.row);
+  }, [rows, headers, idField, emailField, rules]);
+  // Weighting lets a duplicate ID reduce trust more than an advisory PII flag.
+  const score = useMemo(() => rows.length ? Math.max(0, Math.round(100 - (issues.reduce((total, issue) => total + ({ high: 4, medium: 2, low: 1 }[issue.severity]), 0) / rows.length) * 10)) : 0, [rows.length, issues]);
+  const profile = useMemo(() => headers.map((field) => { const values = rows.map((row) => row[field].trim()); const present = values.filter(Boolean); return { field, type: inferType(values), completeness: Math.round((present.length / Math.max(rows.length, 1)) * 100), unique: new Set(present.map((value) => value.toLowerCase())).size, samples: present.slice(0, 3).join(", ") || "—" }; }), [headers, rows]);
+  const visibleIssues = issues.filter((issue) => (filter === "All" || issue.type === filter) && `${issue.field} ${issue.value} ${issue.message}`.toLowerCase().includes(query.toLowerCase()));
+  const count = (type: IssueType) => issues.filter((issue) => issue.type === type).length;
+
+  function load(text: string, name: string) { const nextRows = parseCsv(text); const nextHeaders = nextRows[0] ? Object.keys(nextRows[0]) : []; setRows(nextRows); setFileName(name); setIdField(nextHeaders.find((header) => /(^|[_\s-])id$/i.test(header)) || ""); setEmailField(nextHeaders.find((header) => /e-?mail/i.test(header)) || ""); setFilter("All"); setActiveTab("issues"); }
+  function upload(file?: File) { if (!file || !file.name.toLowerCase().endsWith(".csv")) return; const reader = new FileReader(); reader.onload = () => load(String(reader.result), file.name); reader.readAsText(file); }
+  function saveRun() { if (!rows.length) return; const run = { id: crypto.randomUUID(), fileName, date: new Date().toLocaleString(), rows: rows.length, score, issues: issues.length }; const next = [run, ...history].slice(0, 10); setHistory(next); localStorage.setItem("dia-runs", JSON.stringify(next)); setActiveTab("history"); }
+  // A clean export excludes only high-severity rows so users can safely review
+  // advisory findings without silently discarding data.
+  function exportFile(clean = false) { const data: Row[] = clean ? rows.filter((_, index) => !issues.some((issue) => issue.row === index + 2 && issue.severity === "high")) : issues.map((issue) => ({ row: String(issue.row), field: issue.field, value: issue.value, issue: issue.type, details: issue.message })); const columns = clean ? headers : ["row", "field", "value", "issue", "details"]; const csv = [columns.join(","), ...data.map((record) => columns.map((field) => escapeCsv(record[field] || "")).join(","))].join("\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); link.download = clean ? "cleaned-data.csv" : "data-quality-issues.csv"; link.click(); URL.revokeObjectURL(link.href); }
+  function normalize() { setRows((current) => current.map((row) => Object.fromEntries(Object.entries(row).map(([field, value]) => [field, field === emailField ? value.trim().toLowerCase() : value.trim()])))); }
+  const toggle = (rule: keyof Rules) => setRules((current) => ({ ...current, [rule]: !current[rule] }));
+
+  return <div className="min-h-screen bg-[#f7f8fc] text-slate-900"><header className="border-b border-slate-200 bg-white"><div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8"><div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-600 text-white"><ShieldCheck size={20} /></div><span className="font-semibold tracking-tight">Data Integrity <span className="text-indigo-600">Analyzer</span></span></div><span className="hidden text-sm text-slate-500 sm:block">Trusted data, ready for decisions</span></div></header>
+    <main className="mx-auto max-w-7xl px-5 py-8 sm:px-8"><div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-2 text-xs font-bold tracking-widest text-indigo-600">DATA QUALITY & AI READINESS</p><h1 className="text-3xl font-bold tracking-tight">Know whether your data is trustworthy</h1><p className="mt-2 text-slate-500">Profile, validate, and remediate CSV data before it powers a decision or AI workflow.</p></div>{rows.length > 0 && <button onClick={() => input.current?.click()} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium shadow-sm hover:bg-slate-50"><Upload size={16} /> Upload another file</button>}</div><input ref={input} className="hidden" type="file" accept=".csv,text/csv" onChange={(event: ChangeEvent<HTMLInputElement>) => upload(event.target.files?.[0])} />
+      {!rows.length ? <section onDragOver={(event) => event.preventDefault()} onDrop={(event: DragEvent<HTMLDivElement>) => { event.preventDefault(); upload(event.dataTransfer.files[0]); }} className="rounded-2xl border-2 border-dashed border-indigo-200 bg-white px-6 py-16 text-center shadow-sm"><div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-indigo-600"><FileUp size={27} /></div><h2 className="mt-5 text-xl font-semibold">Drop your CSV file here</h2><p className="mt-2 text-sm text-slate-500">Run configurable quality and AI-readiness checks entirely in your browser.</p><button onClick={() => input.current?.click()} className="mt-6 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white hover:bg-indigo-700"><Upload size={16} /> Select CSV file</button><button onClick={() => load(sample, "sample-customer-data.csv")} className="mt-6 block w-full text-sm font-medium text-indigo-600">Try sample data <ChevronRight className="inline" size={15} /></button></section> : <>
+        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-600"><FileSpreadsheet size={20} /></div><div><p className="font-semibold">{fileName}</p><p className="text-sm text-slate-500">{rows.length.toLocaleString()} records · {headers.length} columns · Browser-only analysis</p></div></div><div className="flex flex-wrap gap-2"><button onClick={normalize} className="tool-button"><WandSparkles size={15} /> Normalize values</button><button onClick={() => exportFile(true)} className="tool-button"><ArrowDownToLine size={15} /> Export clean rows</button><button onClick={saveRun} className="tool-button"><History size={15} /> Save run</button><button onClick={() => { setRows([]); setFileName(""); }} className="tool-button text-slate-500"><X size={15} /> Remove</button></div></div></section>
+        <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><ScoreCard label="Trust score" value={`${score}/100`} icon={score >= 80 ? CheckCircle2 : AlertTriangle} tone={score >= 80 ? "emerald" : "amber"} hint={score >= 80 ? "Ready for review" : "Needs attention"} /><ScoreCard label="Total issues" value={issues.length} icon={AlertTriangle} tone="rose" hint={`${count("Duplicate ID") + count("Duplicate email")} duplicate conflicts`} /><ScoreCard label="Completeness" value={`${profile.length ? Math.round(profile.reduce((total, field) => total + field.completeness, 0) / profile.length) : 0}%`} icon={Database} tone="sky" hint="Across all fields" /><ScoreCard label="AI readiness" value={rules.pii ? `${count("Sensitive data")} flags` : "Not checked"} icon={Sparkles} tone="violet" hint="Potential sensitive data" /></section>
+        <div className="mb-5 flex gap-2 border-b border-slate-200"><Tab active={activeTab === "issues"} onClick={() => setActiveTab("issues")} icon={ShieldAlert} label="Issues" /><Tab active={activeTab === "profile"} onClick={() => setActiveTab("profile")} icon={Database} label="Data profile" /><Tab active={activeTab === "history"} onClick={() => setActiveTab("history")} icon={History} label="Run history" /></div>
+        {activeTab === "issues" && <><section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="flex items-center gap-2 font-semibold"><Settings2 size={17} /> Validation configuration</h2><p className="mt-1 text-sm text-slate-500">Map semantic fields and choose the rules to run.</p></div><div className="grid gap-2 sm:grid-cols-2 lg:flex"><label className="field-label">ID field<select value={idField} onChange={(event) => setIdField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label><label className="field-label">Email field<select value={emailField} onChange={(event) => setEmailField(event.target.value)}><option value="">Not mapped</option>{headers.map((header) => <option key={header}>{header}</option>)}</select></label></div></div><div className="mt-4 flex flex-wrap gap-2">{([ ["required", "Required values"], ["uniqueId", "Unique IDs"], ["email", "Email validation"], ["numeric", "Numeric types"], ["pii", "PII detection"] ] as [keyof Rules, string][]).map(([rule, label]) => <button key={rule} onClick={() => toggle(rule)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${rules[rule] ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500"}`}>{rules[rule] && <Check className="mr-1 inline" size={12} />}{label}</button>)}</div></section>
+          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-col gap-3 border-b border-slate-100 p-5 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-semibold">Detected issues</h2><p className="mt-1 text-sm text-slate-500">High-severity rows are excluded when exporting clean data.</p></div><div className="flex gap-2"><label className="relative"><Search className="absolute left-3 top-2.5 text-slate-400" size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search issues" className="h-9 rounded-lg border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-indigo-400" /></label><button onClick={() => exportFile()} className="tool-button bg-slate-900 text-white"><ArrowDownToLine size={15} /> Export</button></div></div><div className="flex gap-2 overflow-x-auto border-b border-slate-100 px-5 py-3">{(["All", "Duplicate ID", "Duplicate email", "Invalid email", "Missing value", "Invalid type", "Sensitive data"] as const).map((item) => <button key={item} onClick={() => setFilter(item)} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium ${filter === item ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}>{item}{item !== "All" && ` · ${count(item)}`}</button>)}</div><IssueTable issues={visibleIssues} /></section></>}
+        {activeTab === "profile" && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 p-5"><h2 className="font-semibold">Column profile</h2><p className="mt-1 text-sm text-slate-500">Automatic type inference, completeness, uniqueness, and example values.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Field</th><th className="px-5 py-3">Inferred type</th><th className="px-5 py-3">Completeness</th><th className="px-5 py-3">Unique values</th><th className="px-5 py-3">Examples</th></tr></thead><tbody>{profile.map((column) => <tr key={column.field} className="border-t border-slate-100"><td className="px-5 py-3 font-medium">{column.field}</td><td className="px-5 py-3"><span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700">{column.type}</span></td><td className="px-5 py-3"><div className="flex items-center gap-2"><div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100"><div className="h-full bg-emerald-500" style={{ width: `${column.completeness}%` }} /></div>{column.completeness}%</div></td><td className="px-5 py-3 text-slate-600">{column.unique}</td><td className="max-w-72 truncate px-5 py-3 text-slate-500">{column.samples}</td></tr>)}</tbody></table></div></section>}
+        {activeTab === "history" && <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 p-5"><h2 className="font-semibold">Validation history</h2><p className="mt-1 text-sm text-slate-500">Saved locally in this browser. Keep a lightweight audit trail of data-quality runs.</p></div>{history.length ? <div className="divide-y divide-slate-100">{history.map((run) => <div key={run.id} className="flex items-center justify-between gap-4 p-5"><div><p className="font-medium">{run.fileName}</p><p className="mt-1 text-sm text-slate-500">{run.date} · {run.rows} records · {run.issues} issues</p></div><span className={`rounded-full px-3 py-1 text-sm font-semibold ${run.score >= 80 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{run.score}/100</span></div>)}</div> : <Empty icon={History} title="No saved runs yet" text="Save a completed analysis to create an audit history." />}</section>}
+      </>}</main></div>;
+}
+
+function ScoreCard({ label, value, icon: Icon, tone, hint }: { label: string; value: string | number; icon: typeof CheckCircle2; tone: "emerald" | "amber" | "rose" | "sky" | "violet"; hint: string }) { const colors = { emerald: "bg-emerald-50 text-emerald-600", amber: "bg-amber-50 text-amber-600", rose: "bg-rose-50 text-rose-600", sky: "bg-sky-50 text-sky-600", violet: "bg-violet-50 text-violet-600" }; return <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-start justify-between"><p className="text-sm font-medium text-slate-500">{label}</p><div className={`rounded-lg p-2 ${colors[tone]}`}><Icon size={17} /></div></div><p className="mt-3 text-3xl font-bold">{value}</p><p className="mt-1 text-xs text-slate-500">{hint}</p></div>; }
+function Tab({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: typeof Database; label: string }) { return <button onClick={onClick} className={`flex items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium ${active ? "border-indigo-600 text-indigo-600" : "border-transparent text-slate-500"}`}><Icon size={16} />{label}</button>; }
+function Empty({ icon: Icon, title, text }: { icon: typeof History; title: string; text: string }) { return <div className="px-6 py-14 text-center"><Icon className="mx-auto text-slate-300" size={32} /><p className="mt-3 font-medium">{title}</p><p className="mt-1 text-sm text-slate-500">{text}</p></div>; }
+function IssueTable({ issues }: { issues: Issue[] }) { return issues.length ? <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Row</th><th className="px-5 py-3">Field</th><th className="px-5 py-3">Value</th><th className="px-5 py-3">Issue</th><th className="px-5 py-3">Recommended action</th></tr></thead><tbody>{issues.map((issue, index) => <tr key={`${issue.row}-${issue.field}-${issue.type}-${index}`} className="border-t border-slate-100"><td className="px-5 py-3 text-slate-500">{issue.row}</td><td className="px-5 py-3 font-medium">{issue.field}</td><td className="max-w-44 truncate px-5 py-3 text-slate-600">{issue.value}</td><td className="px-5 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${issue.severity === "high" ? "bg-rose-50 text-rose-700" : issue.severity === "medium" ? "bg-amber-50 text-amber-700" : "bg-sky-50 text-sky-700"}`}>{issue.type}</span></td><td className="px-5 py-3 text-slate-500">{issue.type === "Invalid email" ? "Correct or remove the address" : issue.type.includes("Duplicate") ? "Review matching records and merge or retain one" : issue.type === "Sensitive data" ? "Classify, mask, or restrict this value" : issue.message}</td></tr>)}</tbody></table></div> : <Empty icon={CheckCircle2} title="No matching issues" text="The selected validation rules found no matching issues." />; }

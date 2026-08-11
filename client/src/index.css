@@ -128,3 +128,17 @@
     @apply font-sans;
     }
 }
+
+@layer components {
+  .tool-button {
+    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium shadow-sm transition-colors hover:bg-slate-50;
+  }
+
+  .field-label {
+    @apply flex flex-col gap-1 text-xs font-medium text-slate-500;
+  }
+
+  .field-label select {
+    @apply h-9 min-w-36 rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal text-slate-800 outline-none focus:border-indigo-400;
+  }
+}
