@@ -1,0 +1,38 @@
+{
+  "users": [
+    {
+      "id": "admin-1",
+      "email": "admin@example.com",
+      "passwordHash": "cce7a2cf1ae045989cfc914fb95a41526f167a838b3c7d33745143614abace7c",
+      "role": "admin"
+    },
+    {
+      "id": "reviewer-1",
+      "email": "reviewer@example.com",
+      "passwordHash": "baf096fd9de6850705ebb06f5f4f012a28876ba2817d7d54688d5e5124ceb78b",
+      "role": "reviewer"
+    }
+  ],
+  "datasets": [],
+  "ruleSets": [],
+  "auditLog": [
+    {
+      "id": "780fe6bb-9065-4cd9-93e8-e110618a5501",
+      "at": "2026-08-11T20:56:27.378Z",
+      "actor": "reviewer@example.com",
+      "role": "reviewer",
+      "action": "login",
+      "target": "session",
+      "details": {}
+    },
+    {
+      "id": "7141c61c-46ef-4b1a-ad49-f67c01078297",
+      "at": "2026-08-11T20:55:39.908Z",
+      "actor": "admin@example.com",
+      "role": "admin",
+      "action": "login",
+      "target": "session",
+      "details": {}
+    }
+  ]
+}

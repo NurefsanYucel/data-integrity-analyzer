@@ -141,4 +141,8 @@
   .field-label select {
     @apply h-9 min-w-36 rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal text-slate-800 outline-none focus:border-indigo-400;
   }
+
+  .field-label input {
+    @apply h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm font-normal text-slate-800 outline-none focus:border-indigo-400;
+  }
 }
