@@ -2,7 +2,7 @@
 
 A browser-based data-quality and AI-readiness dashboard for CSV files. Upload a dataset to profile its columns, identify integrity risks, configure validation rules, and export actionable results.
 
-The project is designed as a portfolio example for data-integrity software: it makes validation results understandable, traceable, and useful before data is used for analytics or AI workflows.
+The project aims to make validation results understandable, traceable, and useful before data is used for analytics or AI workflows.
 
 ## Features
 
