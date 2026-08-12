@@ -17,6 +17,12 @@ The project is designed as a portfolio example for data-integrity software: it m
 - Stores up to ten validation-run summaries in browser local storage for a lightweight audit history.
 - Includes sample data for a quick product demonstration.
 
+## Portfolio case study
+
+The included [Retail CRM Data Quality Case Study](case-study/README.md) turns the tool into a short analyst narrative: assess whether a customer-contact extract is safe to use, diagnose the risks, and export a traceable remediation result. Upload [the case-study CSV](case-study/retail-crm-quality-case-study.csv) to reproduce it.
+
+It draws on the business context of the [UCI Online Retail dataset](https://uci-ics-mlr-prod.aws.uci.edu/dataset/352/online%2Bretail), a public record of UK online-retail transactions. The included CSV is synthetic because the original transactional dataset does not contain emails or names needed for CRM-quality checks.
+
 ## Technology
 
 - React 19 + TypeScript
@@ -67,6 +73,8 @@ cd client
 npm test
 ```
 
+The tests import the production analysis module, covering CSV parsing, duplicate/missing/invalid-email rules, and trust-score calculation.
+
 ## How validation works
 
 The analyzer auto-detects likely ID and email columns from their headers. Users can change those mappings before reviewing results.
@@ -92,16 +100,18 @@ The PII checks and type inference are simple heuristics for demonstration purpos
 ```text
 client/
 ├── src/
-│   ├── app/App.tsx      # Application state, CSV parser, validation engine, and UI
+│   ├── app/App.tsx      # Application state and dashboard UI
 │   ├── app/main.tsx     # React entry point
+│   ├── lib/quality.mjs  # Reusable parsing, validation, scoring, and profiling engine
 │   └── index.css        # Tailwind theme and reusable component styles
 ├── package.json
 └── vite.config.ts
+server/
+└── index.mjs            # Local role-aware API and audit persistence demo
+case-study/              # Reproducible portfolio scenario and safe sample dataset
+docs/deployment.md       # Static client + Node API deployment checklist
 ```
 
-## Suggested next steps
+## Deployment
 
-- Add unit tests for CSV parsing, validation rules, and scoring.
-- Add a backend for authenticated users, persistent datasets, and auditable remediation actions.
-- Support saved rule sets, schemas, data-source connections, and role-based workflow approvals.
-- Expand PII detection with configurable patterns and false-positive review.
+The project is deployment-ready, but publishing requires access to a hosting account. See [the deployment guide](docs/deployment.md) for the exact build commands and production hardening steps.

@@ -1,0 +1,7 @@
+customer_id,full_name,email,age,department
+1001,Ada Lovelace,ada@analytical.org,36,Engineering
+1002,Grace Hopper,grace.hopper@navy.mil,85,Engineering
+1003,Alan Turing,alan.turing.example,41,Research
+1001,Katherine Johnson,katherine@nasa.gov,101,Research
+1005,,marie@curie.org,66,Science
+1006,Linus Torvalds,grace.hopper@navy.mil,55,Engineering

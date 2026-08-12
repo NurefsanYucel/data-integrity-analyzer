@@ -18,6 +18,7 @@
     "types": ["vite/client"],
 
     "allowArbitraryExtensions": true,
+    "allowJs": true,
     "allowImportingTsExtensions": true,
 
     "verbatimModuleSyntax": true,

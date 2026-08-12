@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 
 const port = Number(process.env.PORT || 8787);
+const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 const storePath = join(process.cwd(), "data.json");
 const initialStore = { users: [{ id: "admin-1", email: "admin@example.com", passwordHash: hash("demo-admin"), role: "admin" }, { id: "reviewer-1", email: "reviewer@example.com", passwordHash: hash("demo-reviewer"), role: "reviewer" }], datasets: [], ruleSets: [], auditLog: [] };
 const sessions = new Map();
@@ -11,7 +12,7 @@ const sessions = new Map();
 function hash(value) { return createHash("sha256").update(value).digest("hex"); }
 function readStore() { if (!existsSync(storePath)) return structuredClone(initialStore); try { return JSON.parse(readFileSync(storePath, "utf8")); } catch { return structuredClone(initialStore); } }
 function writeStore(store) { writeFileSync(storePath, JSON.stringify(store, null, 2)); }
-function json(response, status, body) { response.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "http://localhost:5173", "Access-Control-Allow-Headers": "Content-Type, Authorization" }); response.end(JSON.stringify(body)); }
+function json(response, status, body) { response.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": clientOrigin, "Access-Control-Allow-Headers": "Content-Type, Authorization" }); response.end(JSON.stringify(body)); }
 function actor(request, response) { const token = request.headers.authorization?.replace("Bearer ", ""); const user = token && sessions.get(token); if (!user) { json(response, 401, { error: "Authentication required" }); return null; } return user; }
 function audit(store, user, action, target, details = {}) { store.auditLog.unshift({ id: randomUUID(), at: new Date().toISOString(), actor: user.email, role: user.role, action, target, details }); store.auditLog = store.auditLog.slice(0, 200); }
 async function body(request) { let data = ""; for await (const chunk of request) data += chunk; return data ? JSON.parse(data) : {}; }
@@ -34,4 +35,4 @@ createServer(async (request, response) => {
   if (request.method === "POST" && remediation) { const dataset = store.datasets.find((item) => item.id === remediation[1]); if (!dataset) return json(response, 404, { error: "Dataset not found" }); if (user.role !== "admin" && dataset.ownerId !== user.id) return json(response, 403, { error: "Not allowed" }); const payload = await body(request); dataset.status = payload.status || "remediated"; dataset.remediation = { action: payload.action, note: payload.note || "", by: user.email, at: new Date().toISOString() }; audit(store, user, "remediation_recorded", dataset.id, dataset.remediation); writeStore(store); return json(response, 200, dataset); }
   if (request.method === "GET" && url.pathname === "/api/audit-log") { if (user.role !== "admin") return json(response, 403, { error: "Admin role required" }); return json(response, 200, store.auditLog); }
   return json(response, 404, { error: "Route not found" });
-}).listen(port, () => console.log(`Data Integrity API listening on http://localhost:${port}`));
+}).listen(port, "0.0.0.0", () => console.log(`Data Integrity API listening on port ${port}`));
